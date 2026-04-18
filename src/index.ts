@@ -16,71 +16,83 @@ const lineBlobClient = new line.messagingApi.MessagingApiBlobClient({
   channelAccessToken: config.line.channelAccessToken,
 });
 
-// Scoped sub-app that parses webhook body as raw text so we can verify
-// the LINE signature against the exact bytes that were sent.
-const webhookRoutes = new Elysia()
-  .post("/webhook", async ({ body, headers, set }) => {
-    const rawBody = body as string;
-    const signature = headers["x-line-signature"] ?? "";
+const webhookRoutes = new Elysia().post("/webhook", async ({ body, headers, set }) => {
+  const rawBody = JSON.stringify(body);
+  const signature = headers["x-line-signature"] ?? "";
 
-    if (!line.validateSignature(rawBody, config.line.channelSecret, signature)) {
-      logger.warn("Invalid LINE webhook signature");
-      set.status = 401;
-      return "Unauthorized";
-    }
+  if (!line.validateSignature(rawBody, config.line.channelSecret, signature)) {
+    logger.warn("Invalid LINE webhook signature");
+    set.status = 401;
+    return "Unauthorized";
+  }
 
-    const { events } = JSON.parse(rawBody) as { events: line.webhook.Event[] };
-    logger.info({ count: events.length }, "Received webhook events");
+  const { events } = body as { events: line.webhook.Event[] };
+  logger.info({ count: events.length }, "Received webhook events");
 
-    for (const event of events) {
-      const userId = (event.source as line.webhook.UserSource).userId;
-      if (!userId) continue;
+  for (const event of events) {
+    const userId = (event.source as line.webhook.UserSource).userId;
+    if (!userId) continue;
 
-      if (
-        event.type === "message" &&
-        (event.message.type === "image" || event.message.type === "file")
-      ) {
-        try {
-          const auth = await getAuthenticatedClient(userId);
-          if (!auth) {
-            const authUrl = oauth2Client.generateAuthUrl({
-              access_type: "offline",
-              scope: ["https://www.googleapis.com/auth/drive.file"],
-              state: userId,
-              prompt: "consent",
-            });
-            await lineClient.replyMessage({
-              replyToken: event.replyToken ?? "",
-              messages: [{ type: "text", text: `กรุณาเชื่อมต่อ Google Drive: ${authUrl}` }],
-            });
-            continue;
-          }
-
-          const drive = google.drive({ version: "v3", auth });
-          const folderId = await getOrCreateFolder(drive, userId);
-          const stream = await lineBlobClient.getMessageContent(event.message.id);
-
-          const fileName =
-            event.message.type === "file" && "fileName" in event.message
-              ? (event.message as { fileName: string }).fileName
-              : `LINE_Image_${Date.now()}.jpg`;
-
-          await drive.files.create({
-            requestBody: { name: fileName, parents: [folderId] },
-            media: { body: stream as unknown as import("stream").Readable },
+    if (
+      event.type === "message" &&
+      (event.message.type === "image" || event.message.type === "file")
+    ) {
+      try {
+        const auth = await getAuthenticatedClient(userId);
+        if (!auth) {
+          const authUrl = oauth2Client.generateAuthUrl({
+            access_type: "offline",
+            scope: ["https://www.googleapis.com/auth/drive.file"],
+            state: userId,
+            prompt: "consent",
           });
-
-          logger.info({ userId, fileName }, "File uploaded to Drive");
-        } catch (err) {
-          logger.error({ userId, err: String(err) }, "Failed to process message event");
+          await lineClient.replyMessage({
+            replyToken: event.replyToken ?? "",
+            messages: [{ type: "text", text: `กรุณาเชื่อมต่อ Google Drive: ${authUrl}` }],
+          });
+          continue;
         }
+
+        const drive = google.drive({ version: "v3", auth });
+        const folderId = await getOrCreateFolder(drive, userId);
+        const stream = await lineBlobClient.getMessageContent(event.message.id);
+
+        const fileName =
+          event.message.type === "file" && "fileName" in event.message
+            ? (event.message as { fileName: string }).fileName
+            : `LINE_Image_${Date.now()}.jpg`;
+
+        const fileRes = await drive.files.create({
+          requestBody: { name: fileName, parents: [folderId] },
+          media: { body: stream as unknown as import("stream").Readable },
+        });
+
+        logger.info({ userId, fileName }, "File uploaded to Drive");
+
+        const fileId = fileRes.data.id;
+        const fileUrl = fileId
+          ? `https://drive.google.com/file/d/${fileId}/view`
+          : `https://drive.google.com/drive/folders/${folderId}`;
+
+        // Optionally reply to the user
+        await lineClient.replyMessage({
+          replyToken: event.replyToken ?? "",
+          messages: [
+            {
+              type: "text",
+              text: `อัปโหลดไฟล์ "${fileName}" เรียบร้อยแล้ว! ดูไฟล์ได้ที่: ${fileUrl}`,
+            },
+          ],
+        });
+      } catch (err) {
+        logger.error({ userId, err: String(err) }, "Failed to process message event");
       }
     }
+  }
 
-    set.status = 200;
-    return "ok";
-
-  });
+  set.status = 200;
+  return "ok";
+});
 
 const app = new Elysia()
   .use(
