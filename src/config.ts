@@ -23,4 +23,11 @@ export const config = {
   database: {
     url: requireEnv("DATABASE_URL"),
   },
+
+  bot: {
+    line: {
+      id: requireEnv("BOT_LINE_ID"),
+      link: requireEnv("BOT_LINK"),
+    }
+  }
 } as const;

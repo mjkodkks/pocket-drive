@@ -182,6 +182,7 @@ const app = new Elysia()
       set.headers["content-type"] = "text/html; charset=utf-8";
       return `<html><body style="font-family: sans-serif; text-align: center; padding-top: 3.125rem;">
               <h1>เชื่อมต่อสำเร็จ!</h1><p>กลับไปที่แอป LINE เพื่อส่งไฟล์ได้เลยครับ</p>
+              <a href="${config.bot.line.link}" style="display: inline-block; margin-top: 1.5rem; padding: 0.75rem 1.5rem; background-color: #00c300; color: white; text-decoration: none; border-radius: 4px;">กลับไปที่ LINE</a>
               </body></html>`;
     } catch (error) {
       logger.error(request, `Google OAuth error for LINE user ${lineId}: ${error}`);
