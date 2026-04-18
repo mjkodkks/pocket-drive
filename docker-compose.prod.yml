@@ -1,0 +1,33 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: line_bot_db_prod
+    restart: always
+    env_file:
+      - .env.production
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5111:5432"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: line_bot_app_prod
+    restart: always
+    env_file:
+      - .env.production
+    ports:
+      - "3111:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata_prod:
