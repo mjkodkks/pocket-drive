@@ -50,7 +50,7 @@ const webhookRoutes = new Elysia().post("/webhook", async ({ body, headers, set 
             replyToken: event.replyToken ?? "",
             messages: [{ type: "text", text: `กรุณาเชื่อมต่อ Google Drive: ${authUrl}` }],
           });
-          continue;
+          break;
         }
 
         const drive = google.drive({ version: "v3", auth });
@@ -62,10 +62,14 @@ const webhookRoutes = new Elysia().post("/webhook", async ({ body, headers, set 
             ? (event.message as { fileName: string }).fileName
             : `LINE_Image_${Date.now()}.jpg`;
 
+        let startTime = Date.now();
         const fileRes = await drive.files.create({
           requestBody: { name: fileName, parents: [folderId] },
           media: { body: stream as unknown as import("stream").Readable },
+          fields: "id, name, size",
         });
+        const endTime = Date.now();
+        const uploadTime = endTime - startTime;
 
         logger.info({ userId, fileName }, "File uploaded to Drive");
 
@@ -75,17 +79,29 @@ const webhookRoutes = new Elysia().post("/webhook", async ({ body, headers, set 
           : `https://drive.google.com/drive/folders/${folderId}`;
 
         // Optionally reply to the user
+        console.log("before reply");
         await lineClient.replyMessage({
           replyToken: event.replyToken ?? "",
           messages: [
             {
               type: "text",
-              text: `อัปโหลดไฟล์ "${fileName}" เรียบร้อยแล้ว! ดูไฟล์ได้ที่: ${fileUrl}`,
+              text: `อัปโหลดไฟล์ "${fileName}" เรียบร้อยแล้ว! ดูไฟล์ได้ที่: ${fileUrl} \nโฟลเดอร์ทั้งหมด: https://drive.google.com/drive/folders/${folderId}`,
+            },
+            {
+              type: "text",
+              text: `เวลาที่ใช้ในการอัปโหลด: ${uploadTime}ms \nขนาดไฟล์: ${fileRes.data.size} bytes`,
             },
           ],
         });
-      } catch (err) {
-        logger.error({ userId, err: String(err) }, "Failed to process message event");
+      } catch (error) {
+        const err = error as any;
+        console.error(error);
+        logger.error(
+          { userId, replyToken: event.replyToken, error: err || "" },
+          "Failed to process message event",
+        );
+        set.status = 500;
+        return "Internal Server Error";
       }
     }
   }
