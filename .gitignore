@@ -4,3 +4,4 @@ drizzle
 .env
 .env.production
 pgdata
+logs
